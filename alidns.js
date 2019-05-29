@@ -1,9 +1,15 @@
 'use strict';
+const http = require('http');
 const config = require('./config.json');
 const crypto = require('crypto');
 
 const ALIDNS_HOST = 'alidns.aliyuncs.com';
 const HTTP_METHOD = "GET";
+
+const ACTION_DESCRIBE_SUBDOMAIN = "DescribeSubDomainRecords";
+const ACTION_ADD = "AddDomainRecord";
+const ACTION_UPDATE = "UpdateDomainRecord";
+const ACTION_DELETE = "DeleteDomainRecord";
 
 // 参考: https://help.aliyun.com/document_detail/dns/api-reference/call-method/common-parameters.html?spm=5176.docdns/api-reference/call-method/request.6.129.DHgQI9
 // 以下三个参数需要程序生成: Signature, Timestamp, SignatureNonce
@@ -80,10 +86,185 @@ const getQueryString = function (reqParams) {
   return canonicalizedQueryString;
 };
 
+const getPath = function (reqParams) {
+  return '/?' + getQueryString(reqParams);
+}
+
+/**
+ * 发送API请求
+ * @param {
+      host: ALIDNS_HOST,
+      path: getPath(describeSubParams)
+    } parameter
+ */
+const sendAPIRequest = (parameter) => {
+  return new Promise((resolve, reject) => {
+    http.request(parameter, res => {
+      let body = [];
+      res.on('data', chunk => body.push(chunk))
+        .on('end', () => {
+          try {
+            body = Buffer.concat(body).toString();
+            const result = JSON.parse(body);
+            if (res.statusCode === 200) {
+              resolve(result);
+            } else {
+              reject(result);
+            }
+          } catch (except) {
+            reject(except);
+          }
+        });
+    }).on('error', (error) => {
+      console.error("sendAPIRequest error:" + error.message);
+      reject(error);
+    }).end();
+  })
+}
+
+/**
+ * 查询域名的子域名列表
+ * @param {
+ *    "subDomain":"example.com"
+ * } parameter 
+ */
+const describeSubDomainRecords = (parameter) => {
+  return new Promise((resolve, reject) => {
+    const describeSubParams = {
+      Action: ACTION_DESCRIBE_SUBDOMAIN,
+      SubDomain: parameter.subDomain
+    };
+    sendAPIRequest({
+      host: ALIDNS_HOST,
+      path: getPath(describeSubParams)
+    }).then((result) => {
+      //返回查询结果
+      resolve(result);
+    }).catch((exception) => {
+      //不处理异常，抛出去
+      reject(exception);
+      console.error("exception:" + exception.message);
+    });
+  });
+}
+
+// 这段代码首先会检查已有的记录
+// 如果记录不存在, 会新建一个解析, 并返回 created
+// 如果记录存在, ip 没变化, 不会更新 ip, 并返回 nochg
+// 如果记录存在, ip 有变化, 会更新 ip, 并返回 updated
+// 如果阿里云端返回 400 错误, 则返回 error
+
+const updateRecord = (target) => {
+  return new Promise((resolve, reject) => {
+    const value = target.ip;
+    const subDomain = target.hostname;
+    let checkUpdate = typeof (target.checkUpdate) === "undefined" ? true : (target.checkUpdate == true ? true : false);
+    const domainName = subDomain.split('.').slice(-2).join('.');
+    const rr = subDomain.split('.').slice(0, -2).join('.');
+    const type = target.type ? target.type : "A";
+
+    const updateParmas = {
+      Action: ACTION_UPDATE,
+      RecordId: '',
+      RR: rr,
+      Type: type,
+      Value: value
+    };
+    const addParmas = {
+      Action: ACTION_ADD,
+      DomainName: domainName,
+      RR: rr,
+      Type: type,
+      Value: value
+    };
+
+    //查询是否存在记录
+    describeSubDomainRecords({
+      "subDomain": subDomain
+    }).then((result) => {
+      let shouldUpdate = false;
+      let shouldAdd = true;
+      if (checkUpdate) {
+        result.DomainRecords.Record
+          .filter(record => record.RR === updateParmas.RR)
+          .forEach(record => {
+            shouldAdd = false;
+            if (record.Value !== updateParmas.Value) {
+              shouldUpdate = true;
+              updateParmas.RecordId = record.RecordId;
+            }
+          });
+      }
+      //更新或新增数据
+      if (shouldUpdate) {
+        // 更新域名的解析
+        sendAPIRequest({
+          host: ALIDNS_HOST,
+          path: getPath(updateParmas)
+        }).then((result) => {
+          resolve(result);
+        }).catch((exception) => { resolve(exception); });
+      } else if (shouldAdd) {
+        // 增加新的域名解析
+        sendAPIRequest({
+          host: ALIDNS_HOST,
+          path: getPath(addParmas)
+        }).then((result) => {
+          resolve(result);
+        }).catch((exception) => { resolve(exception); });
+      } else {
+        resolve('nochg');
+      }
+    }).catch((exception) => {
+      //吞掉异常
+      resolve(exception);
+    });
+  });
+};
+
+const deleteRecord = (target) => {
+  return new Promise((resolve, reject) => {
+    const subDomain = target.hostname;
+    const rr = subDomain.split('.').slice(0, -2).join('.');
+    const deleteParmas = {
+      Action: ACTION_DELETE,
+      RR: rr,
+      RecordId: ''
+    };
+    // 首先获取域名信息, 目的是获取要更新的域名的 RecordId
+
+    //查询是否存在记录
+    describeSubDomainRecords({
+      "subDomain": subDomain
+    }).then((result) => {
+      // 获取是否有域名的 RecordId, 如果有可以删除，如果没有则不删除。
+      let foundRecord = false;
+      result.DomainRecords.Record
+        .filter(record => record.RR === deleteParmas.RR)
+        .forEach(record => {
+          foundRecord = false;
+          if (record.Value !== deleteParmas.Value) {
+            foundRecord = true;
+            deleteParmas.RecordId = record.RecordId;
+          }
+        });
+      if (foundRecord) {
+        // 删除域名的解析
+        sendAPIRequest({
+          host: ALIDNS_HOST,
+          path: getPath(deleteParmas)
+        }).then((result) => {
+          resolve(result);
+        }).catch((exception) => { resolve(exception); });
+      } else {
+        resolve('not found');
+      }
+    }).catch((exception) => { resolve(exception); });
+  });
+}
 // 模块化
 module.exports = {
-  getQueryString: getQueryString,
-  getPath: reqParams => '/?' + getQueryString(reqParams),
-  getUrl: reqParams => 'http://' + ALIDNS_HOST + '/?' + getQueryString(reqParams),
-  ALIDNS_HOST: ALIDNS_HOST
+  updateRecord: updateRecord,
+  deleteRecord: deleteRecord,
+  describeSubDomainRecords: describeSubDomainRecords
 };
