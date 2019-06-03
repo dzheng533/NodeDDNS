@@ -29,7 +29,7 @@ const sendAPIRequest = (parameter) => {
     })
 }
 
-sendAPIRequest({ 'host': 'api.ip.la', 'port': 80, 'path': '/' }).then((ip) => { console.log("IP:" + ip) }).catch((error) => {
+sendAPIRequest({ 'host': 'api.ip.la', 'path': '/' }).then((ip) => { console.log("IP:" + ip) }).catch((error) => {
     console.error(error);
 });
 /*

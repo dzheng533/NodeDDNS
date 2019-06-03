@@ -1,10 +1,13 @@
 'use strict';
-const http = require('http');
+const https = require('https');
 const config = require('./config.json');
 const crypto = require('crypto');
 
 const ALIDNS_HOST = 'alidns.aliyuncs.com';
 const HTTP_METHOD = "GET";
+const RESULT_SUCCESS = "success";
+const RESULT_ERROR = "error";
+const RESULT_NOTCHANGE = "not change";
 
 const ACTION_DESCRIBE_SUBDOMAIN = "DescribeSubDomainRecords";
 const ACTION_ADD = "AddDomainRecord";
@@ -98,8 +101,9 @@ const getPath = function (reqParams) {
     } parameter
  */
 const sendAPIRequest = (parameter) => {
+
   return new Promise((resolve, reject) => {
-    http.request(parameter, res => {
+    https.request(parameter, res => {
       let body = [];
       res.on('data', chunk => body.push(chunk))
         .on('end', () => {
@@ -109,6 +113,7 @@ const sendAPIRequest = (parameter) => {
             if (res.statusCode === 200) {
               resolve(result);
             } else {
+              //非200的statusCode都是有问题。
               reject(result);
             }
           } catch (except) {
@@ -202,22 +207,22 @@ const updateRecord = (target) => {
           host: ALIDNS_HOST,
           path: getPath(updateParmas)
         }).then((result) => {
-          resolve(result);
-        }).catch((exception) => { resolve(exception); });
+          resolve(RESULT_SUCCESS);
+        }).catch((exception) => { resolve(RESULT_ERROR); });
       } else if (shouldAdd) {
         // 增加新的域名解析
         sendAPIRequest({
           host: ALIDNS_HOST,
           path: getPath(addParmas)
         }).then((result) => {
-          resolve(result);
-        }).catch((exception) => { resolve(exception); });
+          resolve(RESULT_SUCCESS);
+        }).catch((exception) => { resolve(RESULT_ERROR); });
       } else {
-        resolve('nochg');
+        resolve(RESULT_SUCCESS);
       }
     }).catch((exception) => {
       //吞掉异常
-      resolve(exception);
+      resolve(RESULT_ERROR);
     });
   });
 };
@@ -254,12 +259,12 @@ const deleteRecord = (target) => {
           host: ALIDNS_HOST,
           path: getPath(deleteParmas)
         }).then((result) => {
-          resolve(result);
-        }).catch((exception) => { resolve(exception); });
+          resolve(RESULT_SUCCESS);
+        }).catch((exception) => { resolve(RESULT_ERROR); });
       } else {
-        resolve('not found');
+        resolve(RESULT_SUCCESS);
       }
-    }).catch((exception) => { resolve(exception); });
+    }).catch((exception) => { resolve(RESULT_ERROR); });
   });
 }
 // 模块化
