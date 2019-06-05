@@ -14,6 +14,7 @@ if (runMode === "Server") {
   server.run();
 } else if (runMode === "Client") {
   console.log("Running in client mode.");
+  client.run();
 } else {
   console.log("Only support \"Server\" or \"Client\" mode.");
 }
