@@ -30,7 +30,7 @@ const run = () => {
         ip = process.argv[4];
         type = process.argv[5];
     } else {
-        console.log("Usage: app.js <Clinet> <add|delete> <hostname> <ip> [type]");
+        console.log("Usage: app.js Clinet <add|delete> <hostname> <ip> [type]");
         return;
     }
     let target = {
